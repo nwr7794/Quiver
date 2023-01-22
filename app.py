@@ -59,6 +59,39 @@ def retrieveMortgageData():
 
     return(MTG_DF.to_json())
 
+@app.route("/mergedatasets")
+def mergeDatasets():
+    
+    #for dataset in datasets:
+    #call historical mortgage rates
+    observations = json.dumps(json.loads(fr.series.observations('MORTGAGE30US'))['observations'])
+    MTG_DF = pd.read_json(observations) 
+    MTG_DF.columns = ['realtime_start', 'realtime_end', 'date', 'MTG_RATE']
+
+    #convert date strings to proper datetimes
+    MTG_DF['date'] = pd.to_datetime(MTG_DF['date'])
+    MTG_DF.columns = ['realtime_start', 'realtime_end', 'date', 'MTG_RATE']
+    MTG_DF.drop(axis=1, columns=['realtime_start','realtime_end'], inplace=True)
+    MTG_DF.set_index('date', inplace=True)
+    # using the resample method
+    # https://pandas.pydata.org/docs/reference/api/pandas.core.resample.Resampler.fillna.html
+    MTG_DF = MTG_DF.resample('D').ffill() #this forward fills the previous value up until a new value exists
+
+    #call the historical housing starts series
+    observations = json.dumps(json.loads(fr.series.observations('HOUST'))['observations'])
+    HOUST_DF = pd.read_json(observations)
+    #convert date strings to proper datetimes
+    HOUST_DF['date'] = pd.to_datetime(HOUST_DF['date'])
+    HOUST_DF.columns = ['realtime_start', 'realtime_end', 'date', 'HOUSING_STARTS']
+    HOUST_DF.drop(axis=1, columns=['realtime_start','realtime_end'], inplace=True)
+    HOUST_DF.set_index("date", inplace=True)
+    HOUST_DF = HOUST_DF.resample('D').ffill() #this forward fills the previous value up until a new value exists
+
+    MAIN_FRAME = pd.merge(MTG_DF, HOUST_DF, left_index=True, right_index=True)
+    MAIN_FRAME.index = MAIN_FRAME.index.strftime('%Y/%m/%d')
+
+    return(MAIN_FRAME.to_json())
+
 @app.route("/fredsearch")
 def fredsearch():
 
