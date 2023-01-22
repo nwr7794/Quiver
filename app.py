@@ -34,6 +34,8 @@ def retrieveHousingData():
     HOUST_DF.set_index("date", inplace=True)
     HOUST_DF = HOUST_DF.resample('D').ffill() #this forward fills the previous value up until a new value exists
 
+    HOUST_DF.index = HOUST_DF.index.strftime('%Y/%m/%d')
+
     return(HOUST_DF.to_json())
 
 @app.route("/retrievemortgagerates")
@@ -52,6 +54,10 @@ def retrieveMortgageData():
     # using the resample method
     # https://pandas.pydata.org/docs/reference/api/pandas.core.resample.Resampler.fillna.html
     MTG_DF = MTG_DF.resample('D').ffill() #this forward fills the previous value up until a new value exists
+
+    MTG_DF.index = MTG_DF.index.strftime('%Y/%m/%d')
+
+    return(MTG_DF.to_json())
 
 @app.route("/fredsearch")
 def fredsearch():
