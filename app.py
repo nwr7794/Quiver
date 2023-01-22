@@ -22,7 +22,7 @@ def health():
     return 'OK'    
 
 @app.route("/retrievehousingstarts")
-def retrieveData():
+def retrieveHousingData():
 
     #call the historical housing starts series
     observations = json.dumps(json.loads(fr.series.observations('HOUST'))['observations'])
@@ -35,6 +35,23 @@ def retrieveData():
     HOUST_DF = HOUST_DF.resample('D').ffill() #this forward fills the previous value up until a new value exists
 
     return(HOUST_DF.to_json())
+
+@app.route("/retrievemortgagerates")
+def retrieveMortgageData():
+
+    #call historical mortgage rates
+    observations = json.dumps(json.loads(fr.series.observations('MORTGAGE30US'))['observations'])
+    MTG_DF = pd.read_json(observations) 
+    MTG_DF.columns = ['realtime_start', 'realtime_end', 'date', 'MTG_RATE']
+
+    #convert date strings to proper datetimes
+    MTG_DF['date'] = pd.to_datetime(MTG_DF['date'])
+    MTG_DF.columns = ['realtime_start', 'realtime_end', 'date', 'MTG_RATE']
+    MTG_DF.drop(axis=1, columns=['realtime_start','realtime_end'], inplace=True)
+    MTG_DF.set_index('date', inplace=True)
+    # using the resample method
+    # https://pandas.pydata.org/docs/reference/api/pandas.core.resample.Resampler.fillna.html
+    MTG_DF = MTG_DF.resample('D').ffill() #this forward fills the previous value up until a new value exists
 
 @app.route("/fredsearch")
 def fredsearch():
