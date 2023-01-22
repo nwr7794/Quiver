@@ -21,10 +21,20 @@ app.config.from_object(__name__)
 def health():
     return 'OK'    
 
-@app.route("/retrievedata")
+@app.route("/retrievehousingstarts")
 def retrieveData():
 
-    return(fr.category.children(97))
+    #call the historical housing starts series
+    observations = json.dumps(json.loads(fr.series.observations('HOUST'))['observations'])
+    HOUST_DF = pd.read_json(observations)
+    #convert date strings to proper datetimes
+    HOUST_DF['date'] = pd.to_datetime(HOUST_DF['date'])
+    HOUST_DF.columns = ['realtime_start', 'realtime_end', 'date', 'HOUSING_STARTS']
+    HOUST_DF.drop(axis=1, columns=['realtime_start','realtime_end'], inplace=True)
+    HOUST_DF.set_index("date", inplace=True)
+    HOUST_DF = HOUST_DF.resample('D').ffill() #this forward fills the previous value up until a new value exists
+
+    return(HOUST_DF.to_json())
 
 @app.route("/fredsearch")
 def fredsearch():
