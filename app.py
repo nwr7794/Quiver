@@ -95,7 +95,15 @@ def mergeDatasets():
 @app.route("/fredsearch")
 def fredsearch():
 
-    return 'Search results'    
+    params = {'limit':50,}
+    res = fr.series.search('money service index',params=params)
+    # print(res)
+    observations = json.dumps(json.loads(res))
+    SEARCH_RES_DF = pd.read_json(observations)
+    SEARCH_RES_DF_NEW = SEARCH_RES_DF['seriess']
+    # print(SEARCH_RES_DF_NEW.head())
+    # Convert back to JSON
+    return(SEARCH_RES_DF_NEW.to_json())
 
 #instantiate app
 if __name__ == "__main__":
