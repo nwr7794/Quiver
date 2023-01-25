@@ -95,8 +95,13 @@ def mergeDatasets():
 @app.route("/fredsearch")
 def fredsearch():
 
+    searchKey = request.args.get('searchKey')
+
+    if searchKey == None:
+        return "Error: no search terms provided"
+
     params = {'limit':50,}
-    res = fr.series.search('money service index',params=params)
+    res = fr.series.search(searchKey,params=params)
     # print(res)
     observations = json.dumps(json.loads(res))
     SEARCH_RES_DF = pd.read_json(observations)
