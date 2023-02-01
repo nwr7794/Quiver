@@ -7,6 +7,7 @@ import os
 import json
 from fred import Fred
 import pandas as pd
+import numpy as np
 
 #INIT THE CLIENT
 API_KEY = os.environ.get('FRED_API_KEY')
@@ -109,6 +110,198 @@ def fredsearch():
     # print(SEARCH_RES_DF_NEW.head())
     # Convert back to JSON
     return(SEARCH_RES_DF_NEW.to_json())
+
+
+#receive payload (series names + fill prefs, target frequency)
+@app.route("/giveMeData", methods=['GET','POST'])
+def data_request_hof():
+
+    # #read in the target frequency    
+    # target_output_frequency = request.json['target_frequency']
+    
+    # #expect data_series to be a list of objects
+    # requested_series_identifier_list  = request.json['requested_series_identifier_list']
+
+    #temp stub
+    requested_series_identifier_list = [
+        {
+            "series_identifier":"HOUST", 
+            "fill_methodology":"interpolate"
+            }, 
+        {
+            "series_identifier":"MORTGAGE30US", 
+            "fill_methodology":"interpolate"
+            }]
+
+    target_output_frequency = 'D'
+
+    #define list of objects to send to the next step
+    outgoing_dataseries_list = []
+    outgoing_df_list = []
+    earliest_date = None
+    latest_date = None
+
+    #looooooooooooop
+    for requested_series in requested_series_identifier_list:
+
+        #2 params on each series object
+        series_identifier = requested_series['series_identifier']
+        fill_methodology = requested_series['fill_methodology']
+
+        #define outgoing data  #TODO: future state hold on to the name and description from the original search result
+        detailed_series_data = {
+            'series_name': 'placeholder',
+            'series_identifier': series_identifier,
+            'series_description': 'placeholder',
+            'series_raw_api_response': 'placeholder',
+            'series_raw_observations': 'placeholder',
+            'series_dataframed': 'placeholder',
+            'series_fill_methodology': fill_methodology
+            }
+
+        #get the raw data from FRED
+        detailed_series_data['series_raw_api_response'] = retrieve_raw_fred_data(series_identifier)
+        detailed_series_data['series_name'] = retrieve_series_name(series_identifier)
+        detailed_series_data['series_raw_observations'] = detailed_series_data['series_raw_api_response']['observations']
+
+        # convert to a dataframe and clean it up
+        intermediate_state_dataframe = object_2_dataframe(detailed_series_data['series_name'], detailed_series_data['series_raw_observations'])
+        detailed_series_data['series_dataframed'] = df_cleanup(intermediate_state_dataframe, ['realtime_start','realtime_end'])
+        
+        #calc min and max date here (looking across all the dataframes)
+        local_min  = detailed_series_data['series_dataframed'].index.min()
+        local_max  = detailed_series_data['series_dataframed'].index.max()
+        
+        if earliest_date == None:
+            earliest_date = local_min
+
+        elif local_min < earliest_date:
+            earliest_date = local_min
+
+        if latest_date == None:
+            latest_date = local_max
+
+        elif local_max > latest_date:
+            latest_date = local_max
+
+        #add to list of objects    
+        outgoing_dataseries_list.append(detailed_series_data)
+        outgoing_df_list.append(detailed_series_data['series_dataframed'])
+        
+    #now that we have looped thru the list, we begin transformations
+    #print(outgoing_df_list[0].head())
+    #print(outgoing_df_list[1].head())
+
+    #create the earliest to latest timerange + convert syntax
+    main_frame = pd.DataFrame(np.nan, index=pd.date_range(earliest_date, latest_date), columns=['NaNs'])
+    main_frame.index = main_frame.index.strftime('%Y/%m/%d') 
+    main_frame.drop(axis=1, columns=['NaNs'], inplace=True)
+
+    # shift every series over to the new frame (expect lots of NaNs)
+    for d_frame in outgoing_df_list:
+        #TODO: need to read in name of column to target for resampling (we do not want to resample all)
+        #TODO: also need to read in the resample method
+        #TODO: fill NaNs according to user instructions
+        #main_frame = series.resample(transform_target).mean()
+        
+        #join the frame into main
+        main_frame = main_frame.join(d_frame)
+
+    # return the resulting main dataframe as json to the UI
+    return main_frame.to_json()
+    
+
+def object_2_dataframe(title, incoming_object):
+    d_frame = pd.read_json(json.dumps(incoming_object))
+    d_frame.columns = ['realtime_start', 'realtime_end', 'date', title]
+    return d_frame
+    
+def df_cleanup(dframe, columns_to_remove=None):
+    if columns_to_remove is not None:
+        dframe.drop(axis=1, columns=columns_to_remove, inplace=True)
+    
+    #convert date strings to proper datetimes
+    dframe['date'] = pd.to_datetime(dframe['date'])
+    dframe.set_index('date', inplace=True)
+    #cleaner index in YYMMDD format
+    dframe.index = dframe.index.strftime('%Y/%m/%d') 
+    return dframe
+
+def retrieve_raw_fred_data(series_identifier):
+    # call Fred again....
+    return json.loads(fr.series.observations(series_identifier))
+
+def retrieve_series_name(series_identifier):
+    return json.loads(fr.series.details(series_identifier))['seriess'][0]['title']
+
+def retrieve_series_frequency(series_identifier):
+    return json.loads(fr.series.details(series_identifier))['seriess'][0]['frequency_short']
+
+
+##### Noah OG code
+# fill
+def transform_fill(series, transform_target):
+    outputSeries = series.resample(transform_target).bfill()
+    return outputSeries
+
+# prorate
+def transform_prorate(series, transform_target, series_base_freq):
+    # Resample data to target frequency
+    newDF = series
+    if series_base_freq == "M":
+        newDF["newdate"] = newDF.index + pd.offsets.MonthEnd(0)
+        newDF["prevdate"] = newDF.newdate.shift(1)
+        newDF.iloc[0, newDF.columns.get_loc("prevdate")] = newDF.iloc[
+            0, newDF.columns.get_loc("newdate")
+        ] + pd.offsets.MonthEnd(-1)
+    elif series_base_freq == "Q":
+        newDF["newdate"] = newDF.index + pd.offsets.QuarterEnd(0)
+        newDF["prevdate"] = newDF.newdate.shift(1)
+        newDF.iloc[0, newDF.columns.get_loc("prevdate")] = newDF.iloc[
+            0, newDF.columns.get_loc("newdate")
+        ] + pd.offsets.QuarterEnd(-1)
+    elif series_base_freq == "A":
+        newDF["newdate"] = newDF.index + pd.offsets.YearEnd(0)
+        newDF["prevdate"] = newDF.newdate.shift(1)
+        newDF.iloc[0, newDF.columns.get_loc("prevdate")] = newDF.iloc[
+            0, newDF.columns.get_loc("newdate")
+        ] + pd.offsets.YearEnd(-1)
+    else:  # Assume week
+        newDF["newdate"] = newDF.index
+        newDF["prevdate"] = newDF.newdate.shift(1)
+        newDF.iloc[0, newDF.columns.get_loc("prevdate")] = newDF.iloc[
+            0, newDF.columns.get_loc("newdate")
+        ] + pd.offsets.Week(-1)
+
+    newDF["divisor"] = (newDF["newdate"] - newDF["prevdate"]).dt.days
+    outputSeries = newDF.resample(transform_target).bfill()
+    outputSeries["oldVal"] = pd.to_numeric(outputSeries.iloc[:, 0], errors="coerce")
+
+    outputSeries.iloc[:, 0] = outputSeries["oldVal"] / outputSeries["divisor"]
+    outputSeries.drop(
+        axis=1, columns=["newdate", "divisor", "oldVal", "prevdate"], inplace=True
+    )
+    return outputSeries
+
+
+# interpolate
+def transform_interpolate(series, transform_target):
+    outputSeries = series.resample(transform_target).interpolate()
+    # Currently using linear interpolation, but may want to consider using a spline - good stats question
+    return outputSeries
+
+
+# average
+def transform_average(series, transform_target):
+    outputSeries = series.resample(transform_target).mean()
+    return outputSeries
+
+
+# sum
+def transform_sum(series, transform_target):
+    outputSeries = series.resample(transform_target).sum()
+    return outputSeries
+
 
 #instantiate app
 if __name__ == "__main__":
