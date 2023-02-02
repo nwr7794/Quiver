@@ -153,6 +153,7 @@ def data_request_hof():
             'series_name': 'placeholder',
             'series_identifier': series_identifier,
             'series_description': 'placeholder',
+            'series_frequency': 'placeholder',
             'series_raw_api_response': 'placeholder',
             'series_raw_observations': 'placeholder',
             'series_dataframed': 'placeholder',
@@ -162,6 +163,7 @@ def data_request_hof():
         #get the raw data from FRED
         detailed_series_data['series_raw_api_response'] = retrieve_raw_fred_data(series_identifier)
         detailed_series_data['series_name'] = retrieve_series_name(series_identifier)
+        detailed_series_data['series_frequency'] = retrieve_series_frequency(series_identifier)
         detailed_series_data['series_raw_observations'] = detailed_series_data['series_raw_api_response']['observations']
 
         # convert to a dataframe and clean it up
@@ -187,27 +189,22 @@ def data_request_hof():
         #add to list of objects    
         outgoing_dataseries_list.append(detailed_series_data)
         outgoing_df_list.append(detailed_series_data['series_dataframed'])
-        
-    #now that we have looped thru the list, we begin transformations
-    #print(outgoing_df_list[0].head())
-    #print(outgoing_df_list[1].head())
 
-    #create the earliest to latest timerange + convert syntax
+    #detailed_series_data['series_dataframed'] = detailed_series_data['series_dataframed'].resample(target_output_frequency).ffill()
+        
+    #create the overarching earliest to latest timerange
     main_frame = pd.DataFrame(np.nan, index=pd.date_range(earliest_date, latest_date), columns=['NaNs'])
-    main_frame.index = main_frame.index.strftime('%Y/%m/%d') 
     main_frame.drop(axis=1, columns=['NaNs'], inplace=True)
 
     # shift every series over to the new frame (expect lots of NaNs)
-    for d_frame in outgoing_df_list:
-        #TODO: need to read in name of column to target for resampling (we do not want to resample all)
-        #TODO: also need to read in the resample method
-        #TODO: fill NaNs according to user instructions
-        #main_frame = series.resample(transform_target).mean()
-        
-        #join the frame into main
-        main_frame = main_frame.join(d_frame)
+    for dataseries_object in outgoing_dataseries_list:
+        #resample & join the frame into main
+        #TODO: figure out how to fill the NaNs that are created when the date range extends before or after the dataset
+        main_frame = main_frame.join(resample_hof(dataseries_object, target_output_frequency))
 
     # return the resulting main dataframe as json to the UI
+    main_frame.index = main_frame.index.strftime('%Y/%m/%d') 
+    print(main_frame.head())
     return main_frame.to_json()
     
 
@@ -224,7 +221,7 @@ def df_cleanup(dframe, columns_to_remove=None):
     dframe['date'] = pd.to_datetime(dframe['date'])
     dframe.set_index('date', inplace=True)
     #cleaner index in YYMMDD format
-    dframe.index = dframe.index.strftime('%Y/%m/%d') 
+    #dframe.index = dframe.index.strftime('%Y/%m/%d') 
     return dframe
 
 def retrieve_raw_fred_data(series_identifier):
@@ -237,6 +234,25 @@ def retrieve_series_name(series_identifier):
 def retrieve_series_frequency(series_identifier):
     return json.loads(fr.series.details(series_identifier))['seriess'][0]['frequency_short']
 
+def resample_hof(incoming_data_object, target_output_frequency):
+    for key in incoming_data_object.keys():
+        print(key)
+    series_fill_methodology = incoming_data_object['series_fill_methodology']
+
+    if series_fill_methodology == "fill":
+        resampled_dataset = transform_fill(incoming_data_object['series_dataframed'], target_output_frequency)
+    elif series_fill_methodology == "prorate":
+        resampled_dataset = transform_prorate(incoming_data_object['series_dataframed'], target_output_frequency, incoming_data_object['series_frequency'])
+    elif series_fill_methodology == "interpolate":
+        resampled_dataset = transform_interpolate(incoming_data_object['series_dataframed'], target_output_frequency)
+    elif series_fill_methodology == "average":
+        resampled_dataset = transform_average(incoming_data_object['series_dataframed'], target_output_frequency)
+    elif series_fill_methodology == "sum":
+        resampled_dataset = transform_sum(incoming_data_object['series_dataframed'], target_output_frequency)
+    else:
+        resampled_dataset = incoming_data_object
+
+    return resampled_dataset
 
 ##### Noah OG code
 # fill
