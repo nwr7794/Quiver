@@ -113,27 +113,27 @@ def fredsearch():
 
 
 #receive payload (series names + fill prefs, target frequency)
-@app.route("/giveMeData", methods=['GET','POST'])
+@app.route("/retrievedata", methods=['POST'])
 def data_request_hof():
 
-    # #read in the target frequency    
-    # target_output_frequency = request.json['target_frequency']
+    #read in the target frequency    
+    target_output_frequency = request.json['target_frequency']
     
-    # #expect data_series to be a list of objects
-    # requested_series_identifier_list  = request.json['requested_series_identifier_list']
+    #expect data_series to be a list of objects
+    requested_series_identifier_list  = request.json['requested_series_identifier_list']
 
-    #temp stub
-    requested_series_identifier_list = [
-        {
-            "series_identifier":"HOUST", 
-            "fill_methodology":"interpolate"
-            }, 
-        {
-            "series_identifier":"MORTGAGE30US", 
-            "fill_methodology":"interpolate"
-            }]
+    # #temp stub
+    # requested_series_identifier_list = [
+    #     {
+    #         "series_identifier":"HOUST", 
+    #         "fill_methodology":"interpolate"
+    #         }, 
+    #     {
+    #         "series_identifier":"MORTGAGE30US", 
+    #         "fill_methodology":"interpolate"
+    #         }]
 
-    target_output_frequency = 'D'
+    # target_output_frequency = 'D'
 
     #define list of objects to send to the next step
     outgoing_dataseries_list = []
