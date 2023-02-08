@@ -122,19 +122,6 @@ def data_request_hof():
     #expect data_series to be a list of objects
     requested_series_identifier_list  = request.json['requested_series_identifier_list']
 
-    # #temp stub
-    # requested_series_identifier_list = [
-    #     {
-    #         "series_identifier":"HOUST", 
-    #         "fill_methodology":"interpolate"
-    #         }, 
-    #     {
-    #         "series_identifier":"MORTGAGE30US", 
-    #         "fill_methodology":"interpolate"
-    #         }]
-
-    # target_output_frequency = 'D'
-
     #define list of objects to send to the next step
     outgoing_dataseries_list = []
     outgoing_df_list = []
@@ -204,7 +191,7 @@ def data_request_hof():
 
     # return the resulting main dataframe as json to the UI
     main_frame.index = main_frame.index.strftime('%Y/%m/%d') 
-    print(main_frame.head())
+    
     return main_frame.to_json()
     
 
@@ -228,6 +215,8 @@ def retrieve_raw_fred_data(series_identifier):
     # call Fred again....
     return json.loads(fr.series.observations(series_identifier))
 
+
+#TODO: merge these 2 functions into 1 that accepts different characteristic names
 def retrieve_series_name(series_identifier):
     return json.loads(fr.series.details(series_identifier))['seriess'][0]['title']
 
