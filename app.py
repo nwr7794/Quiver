@@ -22,77 +22,6 @@ app.config.from_object(__name__)
 def health():
     return 'OK'    
 
-@app.route("/retrievehousingstarts")
-def retrieveHousingData():
-
-    #call the historical housing starts series
-    observations = json.dumps(json.loads(fr.series.observations('HOUST'))['observations'])
-    HOUST_DF = pd.read_json(observations)
-    #convert date strings to proper datetimes
-    HOUST_DF['date'] = pd.to_datetime(HOUST_DF['date'])
-    HOUST_DF.columns = ['realtime_start', 'realtime_end', 'date', 'HOUSING_STARTS']
-    HOUST_DF.drop(axis=1, columns=['realtime_start','realtime_end'], inplace=True)
-    HOUST_DF.set_index("date", inplace=True)
-    HOUST_DF = HOUST_DF.resample('D').ffill() #this forward fills the previous value up until a new value exists
-
-    HOUST_DF.index = HOUST_DF.index.strftime('%Y/%m/%d')
-
-    return(HOUST_DF.to_json())
-
-@app.route("/retrievemortgagerates")
-def retrieveMortgageData():
-
-    #call historical mortgage rates
-    observations = json.dumps(json.loads(fr.series.observations('MORTGAGE30US'))['observations'])
-    MTG_DF = pd.read_json(observations) 
-    MTG_DF.columns = ['realtime_start', 'realtime_end', 'date', 'MTG_RATE']
-
-    #convert date strings to proper datetimes
-    MTG_DF['date'] = pd.to_datetime(MTG_DF['date'])
-    MTG_DF.columns = ['realtime_start', 'realtime_end', 'date', 'MTG_RATE']
-    MTG_DF.drop(axis=1, columns=['realtime_start','realtime_end'], inplace=True)
-    MTG_DF.set_index('date', inplace=True)
-    # using the resample method
-    # https://pandas.pydata.org/docs/reference/api/pandas.core.resample.Resampler.fillna.html
-    MTG_DF = MTG_DF.resample('D').ffill() #this forward fills the previous value up until a new value exists
-
-    MTG_DF.index = MTG_DF.index.strftime('%Y/%m/%d')
-
-    return(MTG_DF.to_json())
-
-@app.route("/mergedatasets")
-def mergeDatasets():
-    
-    #for dataset in datasets:
-    #call historical mortgage rates
-    observations = json.dumps(json.loads(fr.series.observations('MORTGAGE30US'))['observations'])
-    MTG_DF = pd.read_json(observations) 
-    MTG_DF.columns = ['realtime_start', 'realtime_end', 'date', 'MTG_RATE']
-
-    #convert date strings to proper datetimes
-    MTG_DF['date'] = pd.to_datetime(MTG_DF['date'])
-    MTG_DF.columns = ['realtime_start', 'realtime_end', 'date', 'MTG_RATE']
-    MTG_DF.drop(axis=1, columns=['realtime_start','realtime_end'], inplace=True)
-    MTG_DF.set_index('date', inplace=True)
-    # using the resample method
-    # https://pandas.pydata.org/docs/reference/api/pandas.core.resample.Resampler.fillna.html
-    MTG_DF = MTG_DF.resample('D').ffill() #this forward fills the previous value up until a new value exists
-
-    #call the historical housing starts series
-    observations = json.dumps(json.loads(fr.series.observations('HOUST'))['observations'])
-    HOUST_DF = pd.read_json(observations)
-    #convert date strings to proper datetimes
-    HOUST_DF['date'] = pd.to_datetime(HOUST_DF['date'])
-    HOUST_DF.columns = ['realtime_start', 'realtime_end', 'date', 'HOUSING_STARTS']
-    HOUST_DF.drop(axis=1, columns=['realtime_start','realtime_end'], inplace=True)
-    HOUST_DF.set_index("date", inplace=True)
-    HOUST_DF = HOUST_DF.resample('D').ffill() #this forward fills the previous value up until a new value exists
-
-    MAIN_FRAME = pd.merge(MTG_DF, HOUST_DF, left_index=True, right_index=True)
-    MAIN_FRAME.index = MAIN_FRAME.index.strftime('%Y/%m/%d')
-
-    return(MAIN_FRAME.to_json())
-
 @app.route("/fredsearch")
 def fredsearch():
 
@@ -103,11 +32,9 @@ def fredsearch():
 
     params = {'limit':50,}
     res = fr.series.search(searchKey,params=params)
-    # print(res)
     observations = json.dumps(json.loads(res))
     SEARCH_RES_DF = pd.read_json(observations)
     SEARCH_RES_DF_NEW = SEARCH_RES_DF['seriess']
-    # print(SEARCH_RES_DF_NEW.head())
     # Convert back to JSON
     return(SEARCH_RES_DF_NEW.to_json())
 
@@ -198,6 +125,20 @@ def data_request_hof():
 def object_2_dataframe(title, incoming_object):
     d_frame = pd.read_json(json.dumps(incoming_object))
     d_frame.columns = ['realtime_start', 'realtime_end', 'date', title]
+
+    # replace invalid chars in the data series
+    d_frame.replace('-', np.nan)
+    d_frame.replace('.', np.nan)
+
+    #corner case where fred sends us a "." as the first entry
+    if d_frame[title][0] == ".":
+        d_frame[title][0] = np.nan
+
+    #check if data came in as a objects, if so, convert it
+    if d_frame[title].dtype not in ['float64', 'int64']:
+        d_frame[title] = d_frame[title].astype(str)
+        d_frame[title] = d_frame[title].astype(float)
+
     return d_frame
     
 def df_cleanup(dframe, columns_to_remove=None):
@@ -224,8 +165,6 @@ def retrieve_series_frequency(series_identifier):
     return json.loads(fr.series.details(series_identifier))['seriess'][0]['frequency_short']
 
 def resample_hof(incoming_data_object, target_output_frequency):
-    for key in incoming_data_object.keys():
-        print(key)
     series_fill_methodology = incoming_data_object['series_fill_methodology']
 
     if series_fill_methodology == "fill":
