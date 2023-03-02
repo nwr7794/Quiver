@@ -1,4 +1,4 @@
-from flask import Flask, Markup, request, redirect, render_template, jsonify
+from flask import Flask, Markup, request, redirect, render_template, jsonify, make_response
 from flask_cors import CORS
 import requests
 from datetime import date
@@ -8,6 +8,8 @@ import json
 from fred import Fred
 import pandas as pd
 import numpy as np
+import io
+import csv
 
 #INIT THE CLIENT
 API_KEY = os.environ.get('FRED_API_KEY')
@@ -22,77 +24,6 @@ app.config.from_object(__name__)
 def health():
     return 'OK'    
 
-@app.route("/retrievehousingstarts")
-def retrieveHousingData():
-
-    #call the historical housing starts series
-    observations = json.dumps(json.loads(fr.series.observations('HOUST'))['observations'])
-    HOUST_DF = pd.read_json(observations)
-    #convert date strings to proper datetimes
-    HOUST_DF['date'] = pd.to_datetime(HOUST_DF['date'])
-    HOUST_DF.columns = ['realtime_start', 'realtime_end', 'date', 'HOUSING_STARTS']
-    HOUST_DF.drop(axis=1, columns=['realtime_start','realtime_end'], inplace=True)
-    HOUST_DF.set_index("date", inplace=True)
-    HOUST_DF = HOUST_DF.resample('D').ffill() #this forward fills the previous value up until a new value exists
-
-    HOUST_DF.index = HOUST_DF.index.strftime('%Y/%m/%d')
-
-    return(HOUST_DF.to_json())
-
-@app.route("/retrievemortgagerates")
-def retrieveMortgageData():
-
-    #call historical mortgage rates
-    observations = json.dumps(json.loads(fr.series.observations('MORTGAGE30US'))['observations'])
-    MTG_DF = pd.read_json(observations) 
-    MTG_DF.columns = ['realtime_start', 'realtime_end', 'date', 'MTG_RATE']
-
-    #convert date strings to proper datetimes
-    MTG_DF['date'] = pd.to_datetime(MTG_DF['date'])
-    MTG_DF.columns = ['realtime_start', 'realtime_end', 'date', 'MTG_RATE']
-    MTG_DF.drop(axis=1, columns=['realtime_start','realtime_end'], inplace=True)
-    MTG_DF.set_index('date', inplace=True)
-    # using the resample method
-    # https://pandas.pydata.org/docs/reference/api/pandas.core.resample.Resampler.fillna.html
-    MTG_DF = MTG_DF.resample('D').ffill() #this forward fills the previous value up until a new value exists
-
-    MTG_DF.index = MTG_DF.index.strftime('%Y/%m/%d')
-
-    return(MTG_DF.to_json())
-
-@app.route("/mergedatasets")
-def mergeDatasets():
-    
-    #for dataset in datasets:
-    #call historical mortgage rates
-    observations = json.dumps(json.loads(fr.series.observations('MORTGAGE30US'))['observations'])
-    MTG_DF = pd.read_json(observations) 
-    MTG_DF.columns = ['realtime_start', 'realtime_end', 'date', 'MTG_RATE']
-
-    #convert date strings to proper datetimes
-    MTG_DF['date'] = pd.to_datetime(MTG_DF['date'])
-    MTG_DF.columns = ['realtime_start', 'realtime_end', 'date', 'MTG_RATE']
-    MTG_DF.drop(axis=1, columns=['realtime_start','realtime_end'], inplace=True)
-    MTG_DF.set_index('date', inplace=True)
-    # using the resample method
-    # https://pandas.pydata.org/docs/reference/api/pandas.core.resample.Resampler.fillna.html
-    MTG_DF = MTG_DF.resample('D').ffill() #this forward fills the previous value up until a new value exists
-
-    #call the historical housing starts series
-    observations = json.dumps(json.loads(fr.series.observations('HOUST'))['observations'])
-    HOUST_DF = pd.read_json(observations)
-    #convert date strings to proper datetimes
-    HOUST_DF['date'] = pd.to_datetime(HOUST_DF['date'])
-    HOUST_DF.columns = ['realtime_start', 'realtime_end', 'date', 'HOUSING_STARTS']
-    HOUST_DF.drop(axis=1, columns=['realtime_start','realtime_end'], inplace=True)
-    HOUST_DF.set_index("date", inplace=True)
-    HOUST_DF = HOUST_DF.resample('D').ffill() #this forward fills the previous value up until a new value exists
-
-    MAIN_FRAME = pd.merge(MTG_DF, HOUST_DF, left_index=True, right_index=True)
-    MAIN_FRAME.index = MAIN_FRAME.index.strftime('%Y/%m/%d')
-
-    return(MAIN_FRAME.to_json())
-
 @app.route("/fredsearch")
 def fredsearch():
 
@@ -101,19 +32,37 @@ def fredsearch():
     if searchKey == None:
         return "Error: no search terms provided"
 
+    print("recieved search term: " + str(searchKey))
+
     params = {'limit':50,}
     res = fr.series.search(searchKey,params=params)
-    # print(res)
     observations = json.dumps(json.loads(res))
     SEARCH_RES_DF = pd.read_json(observations)
     SEARCH_RES_DF_NEW = SEARCH_RES_DF['seriess']
-    # print(SEARCH_RES_DF_NEW.head())
+    print("successfully fetched the search results. returning repsonse now")
     # Convert back to JSON
     return(SEARCH_RES_DF_NEW.to_json())
 
 
+@app.route('/test_download')
+def testing_download():
+    si = io.StringIO()
+    cw = csv.writer(si)
+    csvList = """"REVIEW_DATE","AUTHOR","ISBN","DISCOUNTED_PRICE"
+        "1985/01/21","Douglas Adams",0345391802,5.95
+        "1990/01/12","Douglas Hofstadter",0465026567,9.95
+        "1998/07/15","Timothy ""The Parser"" Campbell",0968411304,18.99
+        "1999/12/03","Richard Friedman",0060630353,5.95
+        "2004/10/04","Randel Helms",0879755725,4.50"""
+    cw.writerows(csvList)
+    output = make_response(si.getvalue())
+    output.headers["Content-Disposition"] = "attachment; filename=export.csv"
+    output.headers["Content-type"] = "text/csv"
+    return output
+
+
 #receive payload (series names + fill prefs, target frequency)
-@app.route("/retrievedata", methods=['POST'])
+@app.route("/retrievedata", methods=['GET'])
 def data_request_hof():
 
     #read in the target frequency    
@@ -122,31 +71,28 @@ def data_request_hof():
     #expect data_series to be a list of objects
     requested_series_identifier_list  = request.json['requested_series_identifier_list']
 
-    # #temp stub
-    # requested_series_identifier_list = [
-    #     {
-    #         "series_identifier":"HOUST", 
-    #         "fill_methodology":"interpolate"
-    #         }, 
-    #     {
-    #         "series_identifier":"MORTGAGE30US", 
-    #         "fill_methodology":"interpolate"
-    #         }]
-
-    # target_output_frequency = 'D'
+    if target_output_frequency == None:
+        return "Error: must specify a target frequency", 404    
+    if requested_series_identifier_list == None:
+        return "Error: Must provide at least 1 requested data series identifier", 404
+    
+    print('requested output frequency', target_output_frequency)
+    print('requested series', requested_series_identifier_list)
 
     #define list of objects to send to the next step
     outgoing_dataseries_list = []
-    outgoing_df_list = []
     earliest_date = None
     latest_date = None
 
     #looooooooooooop
+    i = 0
     for requested_series in requested_series_identifier_list:
 
         #2 params on each series object
         series_identifier = requested_series['series_identifier']
         fill_methodology = requested_series['fill_methodology']
+
+        print("iteration number: ", i, " with identifier: ", series_identifier," and fill methodology: ", fill_methodology)
 
         #define outgoing data  #TODO: future state hold on to the name and description from the original search result
         detailed_series_data = {
@@ -161,16 +107,23 @@ def data_request_hof():
             }
 
         #get the raw data from FRED
+        print("now querying FRED for raw data")
         detailed_series_data['series_raw_api_response'] = retrieve_raw_fred_data(series_identifier)
+        print("query of fred data successful")
+        detailed_series_data['series_raw_observations'] = detailed_series_data['series_raw_api_response']['observations']
+        print("now querying FRED for descriptive info")
         detailed_series_data['series_name'] = retrieve_series_name(series_identifier)
         detailed_series_data['series_frequency'] = retrieve_series_frequency(series_identifier)
-        detailed_series_data['series_raw_observations'] = detailed_series_data['series_raw_api_response']['observations']
+        
 
         # convert to a dataframe and clean it up
+        print("shifting raw data into dataframe")
         intermediate_state_dataframe = object_2_dataframe(detailed_series_data['series_name'], detailed_series_data['series_raw_observations'])
+        print("cleaning dataframe")
         detailed_series_data['series_dataframed'] = df_cleanup(intermediate_state_dataframe, ['realtime_start','realtime_end'])
-        
+        print("clean data head", detailed_series_data['series_dataframed'].head())
         #calc min and max date here (looking across all the dataframes)
+        print("checking local max/min vs. global")
         local_min  = detailed_series_data['series_dataframed'].index.min()
         local_max  = detailed_series_data['series_dataframed'].index.max()
         
@@ -186,31 +139,84 @@ def data_request_hof():
         elif local_max > latest_date:
             latest_date = local_max
 
-        #add to list of objects    
+        #add to list of objects
+        print("adding resulting df to main object")
         outgoing_dataseries_list.append(detailed_series_data)
-        outgoing_df_list.append(detailed_series_data['series_dataframed'])
-
-    #detailed_series_data['series_dataframed'] = detailed_series_data['series_dataframed'].resample(target_output_frequency).ffill()
+        i+=1
         
     #create the overarching earliest to latest timerange
-    main_frame = pd.DataFrame(np.nan, index=pd.date_range(earliest_date, latest_date), columns=['NaNs'])
+    print("setting up main dataframe")
+    main_frame = pd.DataFrame(np.nan, index=pd.date_range(earliest_date, latest_date, freq=target_output_frequency), columns=['NaNs'])
     main_frame.drop(axis=1, columns=['NaNs'], inplace=True)
 
     # shift every series over to the new frame (expect lots of NaNs)
+    print("beginning loop to join dataframes into main")
     for dataseries_object in outgoing_dataseries_list:
         #resample & join the frame into main
         #TODO: figure out how to fill the NaNs that are created when the date range extends before or after the dataset
-        main_frame = main_frame.join(resample_hof(dataseries_object, target_output_frequency))
+        print("now backfilling series id: ",dataseries_object['series_identifier']," and merging into the main dataframe")
+        resampled_data = resample_hof(dataseries_object, target_output_frequency)
+        print(resampled_data)
+        main_frame = main_frame.join(resampled_data)
+        print("successfully backfilled + merged series id: ",dataseries_object['series_identifier'])
+
+
+    #cull the dataframe to only the requested frequency- not fully needed now that we create the daterange using the target output frequency
+    main_frame = period_end_dataframe(main_frame, target_output_frequency)
 
     # return the resulting main dataframe as json to the UI
     main_frame.index = main_frame.index.strftime('%Y/%m/%d') 
-    print(main_frame.head())
-    return main_frame.to_json()
+
+    print("main dataframe completed. returning the result")
+    print("merged", main_frame.head())
+
+    #return CSV to the UI
+    #https://stackoverflow.com/questions/26997679/writing-a-csv-from-flask-framework
+    si = io.StringIO()
+    cw = csv.writer(si)
+    cw.writerows(main_frame.to_csv())
+    output = make_response(si.getvalue())
+    output.headers["Content-Disposition"] = "attachment; filename=export.csv"
+    output.headers["Content-type"] = "text/csv"
+    print("successfully created csv. returning to caller")
+    return output
+    
+
+def period_end_dataframe(original_dataframe, target_output_frequency):
+
+    #https://pandas.pydata.org/docs/reference/api/pandas.Series.dt.is_month_end.html
+    #Examples
+    #This method is available on Series with datetime values under the .dt accessor, and directly on DatetimeIndex.
+    
+    if target_output_frequency == 'D':
+        return original_dataframe
+    elif target_output_frequency == 'M':
+        return(original_dataframe[original_dataframe.index.is_month_end])
+    elif target_output_frequency == 'Q':
+        return(original_dataframe[original_dataframe.index.is_quarter_end])
+    elif target_output_frequency == 'Y':
+        return(original_dataframe[original_dataframe.index.is_year_end])
+    else:
+        return SyntaxError("Missing target output frequency")
     
 
 def object_2_dataframe(title, incoming_object):
     d_frame = pd.read_json(json.dumps(incoming_object))
     d_frame.columns = ['realtime_start', 'realtime_end', 'date', title]
+
+    # replace invalid chars in the data series
+    d_frame.replace('-', np.nan)
+    d_frame.replace('.', np.nan)
+
+    #corner case where fred sends us a "." as the first entry
+    if d_frame[title][0] == ".":
+        d_frame[title][0] = np.nan
+
+    #check if data came in as a objects, if so, convert it
+    if d_frame[title].dtype not in ['float64', 'int64']:
+        d_frame[title] = d_frame[title].astype(str)
+        d_frame[title] = d_frame[title].astype(float)
+
     return d_frame
     
 def df_cleanup(dframe, columns_to_remove=None):
@@ -226,8 +232,10 @@ def df_cleanup(dframe, columns_to_remove=None):
 
 def retrieve_raw_fred_data(series_identifier):
     # call Fred again....
+    #print(fr.category.children(97))
     return json.loads(fr.series.observations(series_identifier))
 
+#TODO: merge these 2 functions into 1 that accepts different characteristic names
 def retrieve_series_name(series_identifier):
     return json.loads(fr.series.details(series_identifier))['seriess'][0]['title']
 
@@ -235,8 +243,6 @@ def retrieve_series_frequency(series_identifier):
     return json.loads(fr.series.details(series_identifier))['seriess'][0]['frequency_short']
 
 def resample_hof(incoming_data_object, target_output_frequency):
-    for key in incoming_data_object.keys():
-        print(key)
     series_fill_methodology = incoming_data_object['series_fill_methodology']
 
     if series_fill_methodology == "fill":
@@ -257,7 +263,8 @@ def resample_hof(incoming_data_object, target_output_frequency):
 ##### Noah OG code
 # fill
 def transform_fill(series, transform_target):
-    outputSeries = series.resample(transform_target).bfill()
+    #note that bfill pulls the future value back in time. ffill pushes an old observation forward.
+    outputSeries = series.resample(transform_target).ffill()
     return outputSeries
 
 # prorate
@@ -290,7 +297,7 @@ def transform_prorate(series, transform_target, series_base_freq):
         ] + pd.offsets.Week(-1)
 
     newDF["divisor"] = (newDF["newdate"] - newDF["prevdate"]).dt.days
-    outputSeries = newDF.resample(transform_target).bfill()
+    outputSeries = newDF.resample(transform_target).ffill()
     outputSeries["oldVal"] = pd.to_numeric(outputSeries.iloc[:, 0], errors="coerce")
 
     outputSeries.iloc[:, 0] = outputSeries["oldVal"] / outputSeries["divisor"]
