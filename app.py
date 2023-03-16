@@ -126,7 +126,11 @@ def data_request_hof():
         print("checking local max/min vs. global")
         local_min  = detailed_series_data['series_dataframed'].index.min()
         local_max  = detailed_series_data['series_dataframed'].index.max()
-        
+        print('Local min is: ',local_min)
+        print('Local max is: ',local_max)
+        print('Earliest date is: ',earliest_date)
+        print('Latest date is: ',latest_date)
+
         if earliest_date == None:
             earliest_date = local_min
 
@@ -156,7 +160,9 @@ def data_request_hof():
         #TODO: figure out how to fill the NaNs that are created when the date range extends before or after the dataset
         print("now backfilling series id: ",dataseries_object['series_identifier']," and merging into the main dataframe")
         resampled_data = resample_hof(dataseries_object, target_output_frequency)
-        print(resampled_data)
+        print('return resampled_data complete')
+        print('This is the main frame: ',main_frame.head(),main_frame.tail())
+        print('This is the resample:', resampled_data.head(),resampled_data.tail())
         main_frame = main_frame.join(resampled_data)
         print("successfully backfilled + merged series id: ",dataseries_object['series_identifier'])
 
@@ -168,7 +174,7 @@ def data_request_hof():
     main_frame.index = main_frame.index.strftime('%Y/%m/%d') 
 
     print("main dataframe completed. returning the result")
-    print("merged", main_frame.head())
+    print("merged", main_frame.head(),main_frame.tail())
 
     # #return CSV to the UI
     # #https://stackoverflow.com/questions/26997679/writing-a-csv-from-flask-framework
@@ -237,7 +243,12 @@ def df_cleanup(dframe, columns_to_remove=None):
     dframe['date'] = pd.to_datetime(dframe['date'])
     dframe.set_index('date', inplace=True)
     #cleaner index in YYMMDD format
-    #dframe.index = dframe.index.strftime('%Y/%m/%d') 
+    #dframe.index = dframe.index.strftime('%Y/%m/%d')
+
+    # Drop NA rows
+    dframe = dframe.dropna()
+    print('Cleaned dataframe head is:',dframe.head())
+
     return dframe
 
 def retrieve_raw_fred_data(series_identifier):
@@ -281,7 +292,12 @@ def resample_hof(incoming_data_object, target_output_frequency):
     elif series_fill_methodology == "sum":
         resampled_dataset = transform_sum(incoming_data_object['series_dataframed'], target_output_frequency)
     else:
-        resampled_dataset = incoming_data_object
+        resampled_dataset = incoming_data_object['series_dataframed']
+        # Transform dates to the end of the month, week, or year using Pandas
+        if target_output_frequency == 'M':
+            resampled_dataset.index = resampled_dataset.index.to_period('M').to_timestamp('M').shift(0)
+        elif target_output_frequency == 'Y':
+            resampled_dataset.index = resampled_dataset.index.to_period('Y').to_timestamp('Y').shift(0)
 
     return resampled_dataset
 
